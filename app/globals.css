@@ -1,0 +1,359 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-apple: "Red Hat Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  }
+
+  html, body, button, input, select, textarea {
+    font-family: var(--font-apple);
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background-color: #f5f5f7;
+    color: #1d1d1f;
+    font-family: var(--font-apple);
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "kern" 1;
+    font-optical-sizing: auto;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Apple Size-Specific Optical Tracking (§15 Typography) */
+  h1, .text-3xl, .text-4xl, .text-5xl {
+    letter-spacing: -0.025em;
+    line-height: 1.15;
+  }
+  h2, h3, .text-xl, .text-2xl {
+    letter-spacing: -0.018em;
+    line-height: 1.25;
+  }
+  h4, h5, .text-lg {
+    letter-spacing: -0.012em;
+    line-height: 1.35;
+  }
+  .caption, .text-xs, .text-\[10px\], .text-\[11px\] {
+    letter-spacing: 0.015em;
+  }
+}
+
+/* Apple Instant Tactile Feedback on Pointer-Down (Clean, Instant, No Lag) */
+button, [role="button"] {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transition: transform 100ms cubic-bezier(0.2, 0.8, 0.2, 1), 
+              opacity 100ms ease, 
+              background-color 140ms ease, 
+              border-color 140ms ease, 
+              box-shadow 140ms ease;
+}
+
+button:active:not(:disabled), [role="button"]:active:not(:disabled) {
+  transform: scale(0.985);
+  opacity: 0.92;
+}
+
+/* Global Brand Button System */
+.btn-royal-primary {
+  background: linear-gradient(180deg, #0e4436 0%, #05271f 100%);
+  color: #f9d564;
+  border: 1px solid rgba(240, 190, 46, 0.55);
+  box-shadow: 0 2px 10px rgba(5, 39, 31, 0.22), 
+              0 0 12px rgba(212, 155, 20, 0.18), 
+              inset 0 1px 1px rgba(255, 243, 196, 0.35);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.btn-royal-primary .material-symbols-outlined {
+  color: #f0be2e;
+  transition: color 140ms ease;
+}
+
+.btn-royal-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #135846 0%, #083329 100%);
+  border-color: rgba(249, 213, 100, 0.85);
+  color: #fff2b2;
+  box-shadow: 0 4px 16px rgba(5, 39, 31, 0.3), 
+              0 0 16px rgba(249, 213, 100, 0.28), 
+              inset 0 1px 1.5px rgba(255, 255, 255, 0.45);
+}
+
+.btn-royal-primary:hover:not(:disabled) .material-symbols-outlined {
+  color: #fff2b2;
+}
+
+.btn-royal-secondary {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 
+              inset 0 1px 1px rgba(255, 255, 255, 0.9);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.btn-royal-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(255, 255, 255, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06), 
+              inset 0 1px 1px rgba(255, 255, 255, 1);
+}
+
+/* Apple Glass & Frosted Materials (§12 Materials & Depth, iOS 27 Liquid Glass) */
+.apple-glass, .ios27-glass {
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.02), inset 0 1px 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.ios27-glass-card {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(22px) saturate(185%);
+  -webkit-backdrop-filter: blur(22px) saturate(185%);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 24px;
+  box-shadow: 0 8px 36px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.02), inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.95);
+}
+
+.ios27-glass-card-interactive {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.04), inset 0 1px 1px 0 rgba(255, 255, 255, 0.9);
+  transition: transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1.0), box-shadow 160ms ease, border-color 160ms ease, background-color 160ms ease;
+}
+
+.ios27-glass-card-interactive:hover {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(229, 184, 76, 0.55);
+  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(229, 184, 76, 0.35), 0 0 18px -2px rgba(229, 184, 76, 0.25), inset 0 1px 1px 0 rgba(255, 255, 255, 1);
+}
+
+.apple-dark-glass, .ios27-glass-dark {
+  background: rgba(3, 30, 23, 0.88);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border: 1px solid rgba(229, 184, 76, 0.35);
+  box-shadow: 0 16px 44px -4px rgba(0, 0, 0, 0.45), 0 0 24px -4px rgba(184, 134, 40, 0.25), inset 0 1px 1.5px 0 rgba(255, 248, 220, 0.4);
+}
+
+/* Specular Metallic Gold Luster Utilities (Neat, Vibrant, High-Contrast) */
+.gold-text-shine {
+  background: linear-gradient(
+    120deg,
+    #d49b14 0%,
+    #f0be2e 24%,
+    #fff2b2 50%,
+    #f9d564 74%,
+    #d49b14 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  display: inline-block;
+}
+
+/* Polished Metallic Gold Surface (Medallions, Active Buttons, Badges) */
+.gold-metallic-surface {
+  background: linear-gradient(
+    135deg,
+    #d49b14 0%,
+    #f0be2e 28%,
+    #fff3c4 50%,
+    #f9d564 72%,
+    #d49b14 100%
+  );
+  color: #05271f !important;
+  box-shadow: 0 4px 16px -2px rgba(212, 155, 20, 0.45), 
+              0 0 12px 0 rgba(249, 213, 100, 0.35),
+              inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.9),
+              inset 0 -1px 2px 0 rgba(143, 97, 6, 0.35);
+}
+
+/* Shining Gold Border & Ambient Glow */
+.gold-shine-ring {
+  border: 2px solid rgba(240, 190, 46, 0.9) !important;
+  box-shadow: 0 0 16px 1px rgba(240, 190, 46, 0.5), 
+              inset 0 1px 2px 0 rgba(255, 243, 196, 0.9);
+}
+
+.gold-glow {
+  filter: drop-shadow(0 0 6px rgba(240, 190, 46, 0.65));
+}
+
+.ios27-glass-pill {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(14px) saturate(170%);
+  -webkit-backdrop-filter: blur(14px) saturate(170%);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), inset 0 1px 0.5px rgba(255, 255, 255, 0.9);
+  border-radius: 9999px;
+}
+
+/* iOS 27 Button Heights and Spacing Standards */
+.ios27-btn-small {
+  height: 34px;
+  padding-left: 14px;
+  padding-right: 14px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ios27-btn-regular {
+  height: 44px;
+  padding-left: 18px;
+  padding-right: 18px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ios27-btn-large {
+  height: 50px;
+  padding-left: 22px;
+  padding-right: 22px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.apple-segmented-track {
+  background: rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 3px;
+  border-radius: 9999px;
+  border: 1px solid rgba(0, 0, 0, 0.03);
+}
+
+.apple-segmented-pill-active {
+  background: #ffffff;
+  color: #1d1d1f;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  border-radius: 9999px;
+  font-weight: 600;
+}
+
+/* Reduced Motion Accessibility (§14) */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+    transform: none !important;
+  }
+}
+
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Crisp Clean Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* 80mm Thermal Receipt Print Stylesheet */
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 0mm;
+  }
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  .no-print, header, aside, button, nav {
+    display: none !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #thermal-receipt-printable,
+  #thermal-receipt-printable * {
+    visibility: visible !important;
+  }
+  #thermal-receipt-printable {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 78mm !important;
+    max-width: 78mm !important;
+    padding: 2mm 3mm !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-family: 'Courier New', Courier, monospace !important;
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+}
+
