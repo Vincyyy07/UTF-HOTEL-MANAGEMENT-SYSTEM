@@ -12,6 +12,8 @@ import {
   calculatePunctuality,
   calculateDeparture,
 } from '../lib/shiftConfig';
+import { StaffAttendanceInfo } from './StaffAttendanceInfo';
+import { MonthlyAttendanceRoster } from './MonthlyAttendanceRoster';
 
 interface AttendanceModuleProps {
   db: DatabaseSchema;
@@ -789,49 +791,51 @@ const FaceTerminal: React.FC<FaceTerminalProps> = ({
           </button>
         </div>
 
-        {/* 4. Enrolled Staff Biometric Reference Gallery */}
-        <div className="ios27-glass-card rounded-[22px] p-4 flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h4 className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
-              <span className="material-symbols-outlined text-slate-600 text-base">badge</span>
-              Enrolled Staff Biometric Database ({enrolledDescriptors.length} Active in DB)
-            </h4>
-            <span className="text-[11px] text-slate-500 font-medium">Ready for instant face recognition</span>
-          </div>
+        {/* 4. Enrolled Staff Biometric Reference Gallery (Admin and Manager only) */}
+        {isAdminView && (
+          <div className="ios27-glass-card rounded-[22px] p-4 flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
+                <span className="material-symbols-outlined text-slate-600 text-base">badge</span>
+                Enrolled Staff Biometric Database ({enrolledDescriptors.length} Active in DB)
+              </h4>
+              <span className="text-[11px] text-slate-500 font-medium">Ready for instant face recognition</span>
+            </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5">
-            {enrolledDescriptors.map(({ staff }) => {
-              const isCurrentlyDetected = liveMatchedStaff?.id === staff.id;
-              return (
-                <div
-                  key={staff.id}
-                  className={`flex items-center gap-2.5 p-2 rounded-xl border transition-all ${
-                    isCurrentlyDetected
-                      ? 'bg-emerald-100/80 border-emerald-400 shadow-sm ring-2 ring-emerald-400'
-                      : 'bg-white border-slate-200/70 hover:border-slate-300'
-                  }`}
-                >
-                  <img
-                    src={staff.photoUrl || `/staff_photos/${staff.id}.jpg`}
-                    alt={staff.fullName}
-                    className="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-200"
-                    onError={(e) => {
-                      (e.target as HTMLElement).setAttribute('src', `/staff_photos/${staff.id}.jpg`);
-                    }}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <span className="text-[11px] font-bold text-slate-900 block truncate">
-                      {staff.fullName}
-                    </span>
-                    <span className="text-[10px] text-slate-500 block truncate capitalize">
-                      {staff.role}
-                    </span>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5">
+              {enrolledDescriptors.map(({ staff }) => {
+                const isCurrentlyDetected = liveMatchedStaff?.id === staff.id;
+                return (
+                  <div
+                    key={staff.id}
+                    className={`flex items-center gap-2.5 p-2 rounded-xl border transition-all ${
+                      isCurrentlyDetected
+                        ? 'bg-emerald-100/80 border-emerald-400 shadow-sm ring-2 ring-emerald-400'
+                        : 'bg-white border-slate-200/70 hover:border-slate-300'
+                    }`}
+                  >
+                    <img
+                      src={staff.photoUrl || `/staff_photos/${staff.id}.jpg`}
+                      alt={staff.fullName}
+                      className="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-200"
+                      onError={(e) => {
+                        (e.target as HTMLElement).setAttribute('src', `/staff_photos/${staff.id}.jpg`);
+                      }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <span className="text-[11px] font-bold text-slate-900 block truncate">
+                        {staff.fullName}
+                      </span>
+                      <span className="text-[10px] text-slate-500 block truncate capitalize">
+                        {staff.role}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
       </div>
     </div>
@@ -1089,7 +1093,8 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
   const isAdminOrManager = currentUser.role === 'admin' || currentUser.role === 'manager';
 
   // Sub-tabs for Admin / Manager
-  const [activeSubTab, setActiveSubTab] = useState<'terminal' | 'roster' | 'test_console' | 'leaves'>('terminal');
+  const [activeSubTab, setActiveSubTab] = useState<'attendance_matrix' | 'terminal' | 'roster' | 'my_attendance' | 'test_console' | 'leaves'>('attendance_matrix');
+  const [adminViewingStaffId, setAdminViewingStaffId] = useState<string>('');
 
   // Test console threshold controls
   const [matchThreshold, setMatchThreshold] = useState<number>(0.55);
@@ -2308,52 +2313,16 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
     );
   };
 
-  // ── 1. STAFF VIEW: ONLY Face Terminal ───────────────────────────────────────
+  // ── 1. STAFF VIEW: ATTENDANCE INFO PORTAL ──────────────────────────────────
   if (!isAdminOrManager) {
     return (
-      <div className="p-3.5 sm:p-6 lg:p-8 max-w-4xl mx-auto flex flex-col gap-4 sm:gap-6">
-        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-200/80 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
-              <span className="material-symbols-outlined text-2xl">center_focus_strong</span>
-            </div>
-            <div>
-              <h2 className="text-base font-extrabold text-slate-900">Attendance Terminal</h2>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Welcome, <strong>{currentUser.name}</strong> ({currentUser.role}). Look into camera to record check-in / check-out.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowQrStandeeModal(true)}
-              className="px-3 py-1.5 rounded-apple text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 shadow-sm transition-all"
-            >
-              <span className="material-symbols-outlined text-sm">qr_code_scanner</span>
-              <span>QR Poster</span>
-            </button>
-            <button
-              onClick={() => setIsScanModalOpen(true)}
-              className="px-3.5 py-1.5 rounded-apple text-xs font-bold bg-gradient-to-r from-gold-500 to-gold-400 hover:brightness-110 text-forest-950 flex items-center gap-1.5 shadow-sm transition-all active:scale-95"
-            >
-              <span className="material-symbols-outlined text-sm">photo_camera</span>
-              <span>Biometric Attendance Terminal</span>
-            </button>
-            <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-              Staff Portal
-            </span>
-          </div>
-        </div>
-
-        <FaceTerminal
+      <div className="p-3 sm:p-6 lg:p-8 max-w-4xl mx-auto flex flex-col gap-5">
+        <StaffAttendanceInfo
           db={db}
           currentUser={currentUser}
-          onVerifyAttendance={onVerifyAttendance}
-          isAdminView={false}
-          matchThreshold={matchThreshold}
-          isScanModalOpen={isScanModalOpen}
-          onOpenScanModal={() => setIsScanModalOpen(true)}
-          onCloseScanModal={() => setIsScanModalOpen(false)}
+          onOpenQrModal={() => setShowQrStandeeModal(true)}
+          onUpdateDb={onUpdateDb}
+          isAdminViewing={false}
         />
         {renderQrStandeeModal()}
       </div>
@@ -2411,7 +2380,7 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
           <div className="flex items-center gap-2.5 flex-wrap md:flex-nowrap overflow-x-auto scrollbar-none">
             {/* Sub Tab Buttons - Apple Segmented Control */}
             <div className="flex bg-black/[0.05] p-1 rounded-apple text-xs font-semibold overflow-x-auto scrollbar-none shrink-0">
-              {(['terminal', 'roster', 'test_console', 'leaves'] as const).map((tab) => (
+              {(['attendance_matrix', 'terminal', 'roster', 'my_attendance', 'leaves', 'test_console'] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveSubTab(tab)}
@@ -2421,13 +2390,17 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  {tab === 'terminal'
+                  {tab === 'attendance_matrix'
+                    ? '📊 Monthly Register & Roster'
+                    : tab === 'terminal'
                     ? 'Face Terminal'
                     : tab === 'roster'
-                    ? 'Daily Roster'
-                    : tab === 'test_console'
-                    ? 'Accuracy Test'
-                    : 'Leaves'}
+                    ? 'Daily Log'
+                    : tab === 'my_attendance'
+                    ? 'Staff View'
+                    : tab === 'leaves'
+                    ? 'Leaves'
+                    : 'Accuracy Test'}
                 </button>
               ))}
             </div>
@@ -2505,6 +2478,15 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
           </div>
         ))}
       </div>
+
+      {/* SUB-TAB: Complete Staff Attendance Register & Monthly Roster (Excel View) */}
+      {activeSubTab === 'attendance_matrix' && (
+        <MonthlyAttendanceRoster
+          db={db}
+          currentUser={currentUser}
+          onUpdateDb={onUpdateDb}
+        />
+      )}
 
       {/* SUB-TAB 1: Face Terminal (kept mounted so neural net models stay ready & popup opens instantly from any tab) */}
       <div className={activeSubTab === 'terminal' ? 'block' : isScanModalOpen ? 'block' : 'hidden'}>
@@ -2952,6 +2934,42 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* SUB-TAB: My Attendance Info for Admin & Manager */}
+      {activeSubTab === 'my_attendance' && (
+        <div className="bg-white p-4 sm:p-6 rounded-2xl shadow-sm border border-slate-200/80 flex flex-col gap-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-slate-500 text-lg">badge</span>
+              <span className="text-xs font-bold text-slate-700">Viewing Staff Record:</span>
+              <select
+                value={adminViewingStaffId || currentUser.id}
+                onChange={(e) => setAdminViewingStaffId(e.target.value)}
+                className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value={currentUser.id}>{currentUser.name} (My Profile)</option>
+                {db.staff.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.fullName} ({s.role})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <span className="text-xs text-slate-400 font-medium">
+              Administrator Attendance Viewer
+            </span>
+          </div>
+
+          <StaffAttendanceInfo
+            db={db}
+            currentUser={currentUser}
+            selectedStaffId={adminViewingStaffId || currentUser.id}
+            onOpenQrModal={() => setShowQrStandeeModal(true)}
+            onUpdateDb={onUpdateDb}
+            isAdminViewing={true}
+          />
         </div>
       )}
 

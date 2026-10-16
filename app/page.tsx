@@ -15,12 +15,18 @@ import { AnalyticsReportsModule } from '../components/AnalyticsReportsModule';
 import { SettingsModule } from '../components/SettingsModule';
 import { NotificationCenter, WaiterNotification, WaiterAlertEngine } from '../components/NotificationCenter';
 import { AuthScreen } from '../components/AuthScreen';
+import { getLocalDateStr } from '../lib/dateUtils';
+import { getCurrentBrowserPosition } from '../lib/geoUtils';
 
 export default function HMSApp() {
   const [db, setDb] = useState<DatabaseSchema | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const currentUserRef = useRef<User | null>(currentUser);
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
   const [selectedTableForOrder, setSelectedTableForOrder] = useState<RestaurantTable | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -142,7 +148,36 @@ export default function HMSApp() {
           if (!isExplicitLoggedOut && savedUserId) {
             const found = json.data.users.find((u: User) => u.id === savedUserId);
             if (found) {
-              setCurrentUser(found);
+              const todayStr = getLocalDateStr(new Date());
+              const userAtt = json.data.attendance?.find(
+                (a: any) => (a.staffId === found.id || a.staffName?.toLowerCase() === found.name?.toLowerCase()) && a.date === todayStr
+              );
+              // If staff member already completed shift / punched out today, don't auto-restore session
+              if (found.role !== 'admin' && userAtt && userAtt.checkOutTime) {
+                try {
+                  localStorage.removeItem('hms_auth_user_id');
+                  localStorage.setItem('hms_logged_out', 'true');
+                } catch {}
+              } else {
+                setCurrentUser(found);
+                // Also trigger punch-in if this staff has not checked in today yet
+                if (found.role !== 'admin' && !userAtt) {
+                  fetch('/api/attendance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      action: 'STAFF_PUNCH',
+                      type: 'in',
+                      staffId: found.id,
+                      userName: found.name,
+                      userRole: found.role,
+                    }),
+                  })
+                    .then((r) => r.json())
+                    .then((res) => { if (res.success && res.data) setDb(res.data); })
+                    .catch((err) => console.warn('Attendance auto-login check-in:', err));
+                }
+              }
             }
           }
         }
@@ -171,14 +206,67 @@ export default function HMSApp() {
     if (initialTab) {
       setActiveTab(initialTab);
     }
+
+    // Automatically record Check-In for staff roles when they log in
+    if (user.role !== 'admin') {
+      getCurrentBrowserPosition(2500).then((coords) => {
+        fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'STAFF_PUNCH',
+            type: 'in',
+            staffId: user.id,
+            userName: user.name,
+            userRole: user.role,
+            latitude: coords?.latitude,
+            longitude: coords?.longitude,
+          }),
+        })
+          .then((res) => res.json())
+          .then((json) => {
+            if (json.success && json.data) {
+              setDb(json.data);
+            }
+          })
+          .catch((err) => console.warn('Attendance login check-in note:', err));
+      });
+    }
   };
 
-  const handleLogout = () => {
+  const handleLogout = (skipPunch = false) => {
+    const userLoggingOut = currentUser;
     setCurrentUser(null);
     try {
       localStorage.removeItem('hms_auth_user_id');
       localStorage.setItem('hms_logged_out', 'true');
     } catch {}
+
+    // Automatically record Check-Out for staff roles when they log out (unless already punched out via 2nd scan)
+    if (!skipPunch && userLoggingOut && userLoggingOut.role !== 'admin') {
+      getCurrentBrowserPosition(2000).then((coords) => {
+        fetch('/api/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'STAFF_PUNCH',
+            type: 'out',
+            staffId: userLoggingOut.id,
+            userName: userLoggingOut.name,
+            userRole: userLoggingOut.role,
+            latitude: coords?.latitude,
+            longitude: coords?.longitude,
+          }),
+        })
+          .then((res) => res.json())
+          .then((json) => {
+            if (json.success && json.data) {
+              setDb(json.data);
+            }
+          })
+          .catch((err) => console.warn('Attendance logout check-out note:', err));
+      });
+    }
   };
 
   useEffect(() => {
@@ -224,6 +312,20 @@ export default function HMSApp() {
               })
             );
           }
+
+          // Automatically log off staff member if they scanned 2nd time (punch-out completed)
+          const activeUser = currentUserRef.current;
+          if (activeUser && activeUser.role !== 'admin') {
+            const todayStr = getLocalDateStr(new Date());
+            const userAtt = json.data.attendance?.find(
+              (a: any) => (a.staffId === activeUser.id || a.staffName?.toLowerCase() === activeUser.name?.toLowerCase()) && a.date === todayStr
+            );
+            if (userAtt && userAtt.checkOutTime) {
+              handleLogout(true);
+              return;
+            }
+          }
+
           setDb(json.data);
         }
       } catch {
@@ -476,6 +578,11 @@ export default function HMSApp() {
   };
 
   const handleVerifyAttendance = async (staffId: string, confidence: number, livenessPassed: boolean) => {
+    let coords: any = null;
+    try {
+      coords = await getCurrentBrowserPosition(2500);
+    } catch {}
+
     const res = await fetch('/api/attendance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -484,13 +591,17 @@ export default function HMSApp() {
         staffId,
         confidence,
         livenessPassed,
-        userName: currentUser.name,
-        userRole: currentUser.role,
+        userName: currentUser?.name || 'Staff',
+        userRole: currentUser?.role || 'staff',
+        latitude: coords?.latitude,
+        longitude: coords?.longitude,
       }),
     });
     const json = await res.json();
     if (json.success && json.data) {
       setDb(json.data);
+    } else if (json.geofenceRestricted || !json.success) {
+      alert(`📍 Attendance Blocked: ${json.message || 'Outside designated restaurant premises.'}`);
     }
     return json;
   };

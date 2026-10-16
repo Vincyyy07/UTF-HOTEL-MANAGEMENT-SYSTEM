@@ -32,6 +32,17 @@ export interface BusinessSettings {
   supabaseUrl?: string;
   supabaseAnonKey?: string;
   supabaseServiceRoleKey?: string;
+  attendanceLocation?: AttendanceLocationSettings;
+}
+
+export interface AttendanceLocationSettings {
+  enabled: boolean;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number; // in meters (e.g. 150)
+  locationName: string; // e.g. "United Food Palace, Benz Circle, Vijayawada"
+  googleMapsUrl?: string; // original pasted link
+  enforceForLogin?: boolean;
 }
 
 export type TableSection = 'AC Grand Hall' | 'Royal Family Suite' | 'Garden Patio' | (string & {});
@@ -214,6 +225,10 @@ export interface AttendanceLog {
   leftEarlyMinutes?: number;
   isOvertime?: boolean;
   overtimeMinutes?: number;
+  verifiedLatitude?: number;
+  verifiedLongitude?: number;
+  distanceMeters?: number;
+  isLocationVerified?: boolean;
   demoFlag?: boolean;
 }
 

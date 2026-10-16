@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { Staff } from '../../../lib/types';
+import { Staff, AttendanceLocationSettings } from '../../../lib/types';
 import { loadBiometricModels, computeEuclideanDistance } from '../../../lib/faceBiometrics';
+import { getCurrentBrowserPosition, calculateDistanceInMeters, formatDistance } from '../../../lib/geoUtils';
 
 interface EnrolledDescriptor {
   staff: Staff;
@@ -41,12 +42,63 @@ export default function MobileFaceScanPage() {
     message: string;
     confidence: number;
   } | null>(null);
-  const [closeCountdown, setCloseCountdown] = useState<number>(3);
-  const [submitting, setSubmitting] = useState<boolean>(false);
+  // Geolocation & Geofencing states
+  const [locationSettings, setLocationSettings] = useState<AttendanceLocationSettings | null>(null);
+  const [liveLocation, setLiveLocation] = useState<{
+    latitude: number;
+    longitude: number;
+    accuracy?: number;
+    distanceMeters?: number;
+    isInside?: boolean;
+  } | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<'acquiring' | 'ready' | 'denied' | 'unsupported'>('acquiring');
+  const [geofenceError, setGeofenceError] = useState<{
+    staffName?: string;
+    message: string;
+    distanceMeters?: number;
+    allowedRadius?: number;
+    locationName?: string;
+  } | null>(null);
 
   // Digital Clock
   const [timeStr, setTimeStr] = useState<string>('');
   const [dateStr, setDateStr] = useState<string>('');
+  const [closeCountdown, setCloseCountdown] = useState<number>(3);
+  const [submitting, setSubmitting] = useState<boolean>(false);
+
+  // Live Location Tracker
+  const refreshLocation = useCallback(async (locConfig?: AttendanceLocationSettings | null) => {
+    const activeConfig = locConfig !== undefined ? locConfig : locationSettings;
+    try {
+      const pos = await getCurrentBrowserPosition(5000);
+      if (pos) {
+        setGpsStatus('ready');
+        let dist: number | undefined;
+        let inside: boolean | undefined;
+        if (activeConfig && activeConfig.latitude && activeConfig.longitude) {
+          dist = calculateDistanceInMeters(
+            pos.latitude,
+            pos.longitude,
+            activeConfig.latitude,
+            activeConfig.longitude
+          );
+          inside = dist <= (activeConfig.radiusMeters || 150);
+        }
+        setLiveLocation({ ...pos, distanceMeters: dist, isInside: inside });
+        return { ...pos, distanceMeters: dist, isInside: inside };
+      } else {
+        setGpsStatus('denied');
+        return null;
+      }
+    } catch {
+      setGpsStatus('denied');
+      return null;
+    }
+  }, [locationSettings]);
+
+  useEffect(() => {
+    refreshLocation();
+  }, [refreshLocation]);
 
   useEffect(() => {
     const updateTime = () => {
@@ -136,6 +188,11 @@ export default function MobileFaceScanPage() {
 
         if (data.restaurantName) {
           setRestaurantName(data.restaurantName);
+        }
+
+        if (data.attendanceLocation) {
+          setLocationSettings(data.attendanceLocation);
+          refreshLocation(data.attendanceLocation);
         }
 
         const staffList: Staff[] = data.staff || [];
@@ -249,6 +306,17 @@ export default function MobileFaceScanPage() {
       lastVerifiedTimeRef.current[staff.id] = now;
       setSubmitting(true);
 
+      // Obtain coordinates for geofence verification
+      let coords = liveLocation;
+      if (!coords?.latitude) {
+        try {
+          const fresh = await getCurrentBrowserPosition(2500);
+          if (fresh) {
+            coords = { ...fresh };
+          }
+        } catch {}
+      }
+
       try {
         const res = await fetch('/api/attendance', {
           method: 'POST',
@@ -260,10 +328,31 @@ export default function MobileFaceScanPage() {
             livenessPassed: true,
             userName: staff.fullName,
             userRole: staff.role,
+            latitude: coords?.latitude,
+            longitude: coords?.longitude,
           }),
         });
 
         const json = await res.json();
+
+        // 🚫 Off-premises Geofence Enforcement: Block Attendance Immediately
+        if (!json.success || json.geofenceRestricted) {
+          stopCamera();
+          isLoopActiveRef.current = false;
+          playChime('info');
+          if (typeof navigator !== 'undefined' && navigator.vibrate) {
+            navigator.vibrate([300, 100, 300]);
+          }
+          setGeofenceError({
+            staffName: staff.fullName,
+            message: json.message || 'Off-premises attendance rejected. You must be inside restaurant premises.',
+            distanceMeters: json.distanceMeters ?? coords?.distanceMeters,
+            allowedRadius: json.allowedRadius ?? locationSettings?.radiusMeters ?? 150,
+            locationName: json.requiredLocation ?? locationSettings?.locationName ?? restaurantName,
+          });
+          return;
+        }
+
         const punchType: 'punch_in' | 'punch_out' | 'already_completed' = json.punchType || 'punch_in';
 
         // Stop camera and scanner loop immediately on verification
@@ -280,6 +369,14 @@ export default function MobileFaceScanPage() {
           if (typeof navigator !== 'undefined' && navigator.vibrate) {
             navigator.vibrate([200, 80, 200]);
           }
+          // Automatically log off local portal session if opened on same device
+          try {
+            const savedUserId = localStorage.getItem('hms_auth_user_id');
+            if (savedUserId === staff.id) {
+              localStorage.removeItem('hms_auth_user_id');
+              localStorage.setItem('hms_logged_out', 'true');
+            }
+          } catch {}
         } else {
           playChime('info');
         }
@@ -301,12 +398,12 @@ export default function MobileFaceScanPage() {
         setSubmitting(false);
       }
     },
-    [submitting, playChime, stopCamera]
+    [submitting, playChime, stopCamera, liveLocation, locationSettings, restaurantName]
   );
 
   // 3. Continuous Face Recognition Frame Analysis
   useEffect(() => {
-    if (!cameraActive || modelStatus !== 'ready' || !faceApiRef.current || verificationResult) {
+    if (!cameraActive || modelStatus !== 'ready' || !faceApiRef.current || verificationResult || geofenceError) {
       return;
     }
 
@@ -315,7 +412,7 @@ export default function MobileFaceScanPage() {
     let isProcessing = false;
 
     const analyzeFrame = async () => {
-      if (!isLoopActiveRef.current || verificationResult) return;
+      if (!isLoopActiveRef.current || verificationResult || geofenceError) return;
 
       const video = videoRef.current;
       const canvas = canvasRef.current;
@@ -386,10 +483,11 @@ export default function MobileFaceScanPage() {
       isLoopActiveRef.current = false;
       cancelAnimationFrame(frameId);
     };
-  }, [cameraActive, modelStatus, verificationResult, recordAttendance]);
+  }, [cameraActive, modelStatus, verificationResult, geofenceError, recordAttendance]);
 
   const handleResetForNext = useCallback(() => {
     setVerificationResult(null);
+    setGeofenceError(null);
     setCloseCountdown(0);
     setFaceDetected(false);
     startCamera(cameraFacing);
@@ -466,8 +564,132 @@ export default function MobileFaceScanPage() {
         </div>
       </header>
 
+      {/* Geofence & Location Status Sub-header */}
+      <div className="px-4 py-2 bg-black/40 border-b border-gold-500/10 flex items-center justify-between text-xs backdrop-blur-sm">
+        <div className="flex items-center gap-2">
+          <span className="material-symbols-outlined text-[15px] text-gold-400">near_me</span>
+          {locationSettings?.enabled ? (
+            liveLocation?.distanceMeters !== undefined ? (
+              liveLocation.isInside ? (
+                <span className="inline-flex items-center gap-1.5 text-emerald-400 font-semibold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  In Premises • {liveLocation.distanceMeters}m from center
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-rose-400 font-semibold">
+                  <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping"></span>
+                  Off-Premises • {formatDistance(liveLocation.distanceMeters)} away (Limit {locationSettings.radiusMeters}m)
+                </span>
+              )
+            ) : gpsStatus === 'acquiring' ? (
+              <span className="inline-flex items-center gap-1.5 text-amber-300 font-medium">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                Acquiring GPS position...
+              </span>
+            ) : gpsStatus === 'denied' ? (
+              <span className="inline-flex items-center gap-1.5 text-rose-400 font-medium">
+                <span className="w-2 h-2 rounded-full bg-rose-400"></span>
+                Location access denied • Enable GPS in browser
+              </span>
+            ) : (
+              <span className="text-slate-400">Detecting premises boundary...</span>
+            )
+          ) : (
+            <span className="text-slate-400">Geofencing Inactive</span>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => refreshLocation()}
+          className="text-[11px] font-bold text-gold-400 hover:text-gold-300 flex items-center gap-1 hover:underline cursor-pointer"
+          title="Re-check GPS Position"
+        >
+          <span className="material-symbols-outlined text-xs">refresh</span>
+          GPS Sync
+        </button>
+      </div>
+
       {/* Main Scanner Section */}
       <main className="flex-1 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+        {/* Off-Premises Geofence Blocked Modal Overlay */}
+        {geofenceError && (
+          <div className="absolute inset-0 bg-[#021812]/95 backdrop-blur-xl z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="max-w-sm w-full bg-slate-900 border-2 border-rose-500/80 rounded-3xl p-6 sm:p-7 text-center shadow-2xl space-y-4">
+              {/* Badge Icon */}
+              <div className="flex justify-center">
+                <div className="w-20 h-20 rounded-full bg-rose-500/20 border-2 border-rose-500 flex items-center justify-center text-rose-400 shadow-[0_0_28px_rgba(244,63,94,0.6)] animate-pulse">
+                  <span className="material-symbols-outlined text-4xl">location_off</span>
+                </div>
+              </div>
+
+              {/* Title & Type */}
+              <div>
+                <span className="px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider inline-block mb-2 bg-rose-500/20 text-rose-300 border border-rose-400/50">
+                  🚫 Off-Premises Blocked
+                </span>
+                <h1 className="text-2xl font-black text-white tracking-tight">
+                  Attendance Not Marked
+                </h1>
+                {geofenceError.staffName && (
+                  <h2 className="text-base font-bold text-rose-300 mt-1">
+                    {geofenceError.staffName}
+                  </h2>
+                )}
+              </div>
+
+              {/* Geofence Distance Details */}
+              <div className="bg-black/40 rounded-2xl p-3 border border-rose-500/30 grid grid-cols-2 gap-2 text-xs text-left">
+                <div className="bg-white/5 p-2.5 rounded-xl">
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Your Distance</span>
+                  <span className="font-bold text-rose-400 text-sm tabular-nums">
+                    {geofenceError.distanceMeters !== undefined ? formatDistance(geofenceError.distanceMeters) : 'Not Detected'}
+                  </span>
+                </div>
+                <div className="bg-white/5 p-2.5 rounded-xl">
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Allowed Radius</span>
+                  <span className="font-bold text-emerald-400 text-sm tabular-nums">
+                    {geofenceError.allowedRadius ? `${geofenceError.allowedRadius}m` : '150m'}
+                  </span>
+                </div>
+                <div className="col-span-2 bg-white/5 p-2 rounded-xl">
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Designated Premises</span>
+                  <span className="font-medium text-slate-200 text-xs truncate block">
+                    📍 {geofenceError.locationName || 'Restaurant Premises'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Message */}
+              <p className="text-xs text-slate-300 font-medium leading-relaxed">
+                {geofenceError.message || 'Staff can only post attendance from within the authorized restaurant premises.'}
+              </p>
+
+              {/* Actions */}
+              <div className="pt-2 flex flex-col gap-2.5">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await refreshLocation();
+                    handleResetForNext();
+                  }}
+                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white font-extrabold text-sm transition-all active:scale-95 shadow-lg flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-base">my_location</span>
+                  <span>Refresh GPS &amp; Retry</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetForNext}
+                  className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 font-bold text-xs cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Verification Success / Status Modal Overlay */}
         {verificationResult && (
           <div className="absolute inset-0 bg-[#021812]/95 backdrop-blur-xl z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
@@ -503,17 +725,17 @@ export default function MobileFaceScanPage() {
                   {verificationResult.punchType === 'punch_in'
                     ? '🟢 CHECK-IN CONFIRMED'
                     : verificationResult.punchType === 'punch_out'
-                    ? '🔴 SHIFT COMPLETED'
+                    ? '🔴 SHIFT COMPLETED • LOGGED OFF'
                     : 'ℹ️ NOTICE'}
                 </span>
 
-                {/* Primary Large Heading: Punched In or Punched Out */}
+                {/* Primary Large Heading: Punched In or Shift Logged Off */}
                 <h1 className="text-3xl font-black text-white tracking-tight">
                   {verificationResult.punchType === 'punch_in'
                     ? 'Punched In'
                     : verificationResult.punchType === 'punch_out'
-                    ? 'Punched Out'
-                    : 'Already Punched Out'}
+                    ? 'Shift Logged Off'
+                    : 'Already Logged Off'}
                 </h1>
 
                 <h2 className="text-lg font-bold text-gold-300 mt-1">

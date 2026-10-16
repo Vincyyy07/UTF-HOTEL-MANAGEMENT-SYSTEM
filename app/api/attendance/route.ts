@@ -9,6 +9,7 @@ import {
   calculateDeparture,
   parseTimeToMinutes,
 } from '../../../lib/shiftConfig';
+import { calculateDistanceInMeters, formatDistance } from '../../../lib/geoUtils';
 
 function calculateShiftHours(inTimeStr?: string, outTimeStr?: string): number {
   if (!inTimeStr || !outTimeStr) return 4.0;
@@ -35,6 +36,7 @@ export async function GET() {
       shifts: db.shifts || DEFAULT_SHIFTS,
       todayAttendance: db.attendance.filter((a) => a.date === todayStr),
       restaurantName: db.settings?.restaurantName || 'United Food Palace',
+      attendanceLocation: db.settings?.attendanceLocation || null,
     });
   } catch (error) {
     return NextResponse.json({ success: false, error: (error as Error).message }, { status: 500 });
@@ -57,7 +59,7 @@ export async function POST(req: Request) {
     // 1. BIOMETRIC ATTENDANCE VERIFICATION (PUNCH IN / PUNCH OUT)
     // ──────────────────────────────────────────────────────────────────────────
     if (action === 'VERIFY_FACE_ATTENDANCE') {
-      const { staffId, confidence = 99.4, livenessPassed = true } = body;
+      const { staffId, confidence = 99.4, livenessPassed = true, latitude, longitude } = body;
       const staffMember = db.staff.find((s) => s.id === staffId);
       if (!staffMember) {
         return NextResponse.json({ success: false, message: 'Staff member not found' }, { status: 404 });
@@ -68,6 +70,36 @@ export async function POST(req: Request) {
           success: false,
           message: 'Biometric liveness check failed (blink/head-turn verification rejected)',
         }, { status: 400 });
+      }
+
+      // Check Geofence Enforcement
+      const locationConfig = db.settings?.attendanceLocation;
+      let verifiedDistance: number | undefined;
+      if (locationConfig && locationConfig.enabled) {
+        if (latitude === undefined || longitude === undefined || isNaN(Number(latitude)) || isNaN(Number(longitude))) {
+          return NextResponse.json({
+            success: false,
+            geofenceRestricted: true,
+            message: `📍 Geofence restriction: GPS location is required to verify attendance at ${locationConfig.locationName || 'the restaurant'}. Please enable location permissions on your device.`,
+          }, { status: 403 });
+        }
+
+        verifiedDistance = calculateDistanceInMeters(
+          Number(latitude),
+          Number(longitude),
+          locationConfig.latitude,
+          locationConfig.longitude
+        );
+
+        if (verifiedDistance > locationConfig.radiusMeters) {
+          return NextResponse.json({
+            success: false,
+            geofenceRestricted: true,
+            distance: verifiedDistance,
+            allowedRadius: locationConfig.radiusMeters,
+            message: `📍 Attendance Rejected: Outside restaurant premises (${formatDistance(verifiedDistance)} away). Maximum allowed radius is ${locationConfig.radiusMeters}m from ${locationConfig.locationName || 'the premises'}.`,
+          }, { status: 403 });
+        }
       }
 
       const assignedShift = getShiftForStaff(staffMember, db.shifts);
@@ -181,31 +213,42 @@ export async function POST(req: Request) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 2. MANUAL ATTENDANCE OVERRIDE
+    // 2. MANUAL ATTENDANCE OVERRIDE & CELL ROSTER UPDATE
     // ──────────────────────────────────────────────────────────────────────────
     if (action === 'MANAGER_OVERRIDE') {
-      const { staffId, checkInTime, checkOutTime, reason } = body;
-      if (!reason) {
-        return NextResponse.json({ success: false, message: 'Manager override reason is mandatory' }, { status: 400 });
+      const { staffId, date: overrideDate, checkInTime, checkOutTime, reason, status: overrideStatus, shiftId: customShiftId } = body;
+      const targetDate = overrideDate || todayStr;
+      const effectiveReason = reason || `Admin Sheet Update (${overrideStatus || 'present'})`;
+
+      let staffMember = db.staff.find((s) => s.id === staffId);
+      if (!staffMember && userName) {
+        staffMember = db.staff.find((s) => s.fullName.toLowerCase() === userName.toLowerCase());
       }
-      const staffMember = db.staff.find((s) => s.id === staffId);
       if (!staffMember) return NextResponse.json({ success: false, message: 'Staff member not found' }, { status: 404 });
 
-      const assignedShift = getShiftForStaff(staffMember, db.shifts);
-      const punctuality = calculatePunctuality(checkInTime || '11:00', assignedShift);
-      const effectiveCheckIn = checkInTime || '11:00';
-      const hoursWorked = checkOutTime ? calculateShiftHours(effectiveCheckIn, checkOutTime) : 8.0;
+      // Determine shift
+      let assignedShift = customShiftId ? db.shifts.find((s) => s.id === customShiftId) : null;
+      if (!assignedShift) {
+        assignedShift = getShiftForStaff(staffMember, db.shifts);
+      }
 
-      const existingIdx = db.attendance.findIndex((a) => a.staffId === staffMember.id && a.date === todayStr);
+      const effectiveStatus = overrideStatus || (checkInTime ? 'present' : 'override');
+      const isAbsent = effectiveStatus === 'absent';
+      const effectiveCheckIn = isAbsent ? undefined : (checkInTime || (assignedShift ? assignedShift.startTime : '10:00'));
+      const effectiveCheckOut = isAbsent ? undefined : (checkOutTime || (assignedShift ? assignedShift.endTime : '19:00'));
+      const punctuality = effectiveCheckIn ? calculatePunctuality(effectiveCheckIn, assignedShift) : { isLate: false, lateMinutes: 0, status: 'present' as const, message: 'On Time' };
+      const hoursWorked = isAbsent ? 0 : (effectiveCheckIn && effectiveCheckOut ? calculateShiftHours(effectiveCheckIn, effectiveCheckOut) : 8.0);
+
+      const existingIdx = db.attendance.findIndex((a) => (a.staffId === staffMember!.id || a.staffName.toLowerCase() === staffMember!.fullName.toLowerCase()) && a.date === targetDate);
       if (existingIdx >= 0) {
         db.attendance[existingIdx] = {
           ...db.attendance[existingIdx],
           checkInTime: effectiveCheckIn,
-          checkOutTime: checkOutTime || db.attendance[existingIdx].checkOutTime,
-          hoursWorked: checkOutTime ? hoursWorked : (db.attendance[existingIdx].hoursWorked || 8.0),
-          status: 'override',
+          checkOutTime: effectiveCheckOut,
+          hoursWorked,
+          status: effectiveStatus,
           verificationMethod: 'manager_override',
-          overrideReason: reason,
+          overrideReason: effectiveReason,
           overrideBy: userName || 'Manager',
           shiftId: assignedShift.id,
           shiftName: assignedShift.name,
@@ -215,18 +258,18 @@ export async function POST(req: Request) {
         };
       } else {
         const newLog: AttendanceLog = {
-          id: `att-${todayStr}-${staffMember.id}-override`,
+          id: `att-${targetDate}-${staffMember.id}-override`,
           staffId: staffMember.id,
           staffName: staffMember.fullName,
           staffRole: staffMember.role,
           staffPhotoUrl: staffMember.photoUrl,
-          date: todayStr,
+          date: targetDate,
           checkInTime: effectiveCheckIn,
-          checkOutTime,
+          checkOutTime: effectiveCheckOut,
           hoursWorked,
-          status: 'override',
+          status: effectiveStatus,
           verificationMethod: 'manager_override',
-          overrideReason: reason,
+          overrideReason: effectiveReason,
           overrideBy: userName || 'Manager',
           shiftId: assignedShift.id,
           shiftName: assignedShift.name,
@@ -239,12 +282,12 @@ export async function POST(req: Request) {
       }
 
       logAudit(db, userName || 'Manager', userRole || 'manager', 'ATTENDANCE_OVERRIDE', 'ATTENDANCE', staffMember.employeeCode, {
-        newValue: `Manual override recorded at ${checkInTime || '11:00'} (${assignedShift.name})`,
-        reason,
+        newValue: `Record updated for ${targetDate}: ${effectiveStatus.toUpperCase()} (${assignedShift.name})`,
+        reason: effectiveReason,
       });
 
       saveDatabase(db);
-      return NextResponse.json({ success: true, message: 'Manual override logged successfully', data: db });
+      return NextResponse.json({ success: true, message: `Updated attendance for ${staffMember.fullName} on ${targetDate}`, data: db });
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -325,6 +368,159 @@ export async function POST(req: Request) {
       db.attendance = db.attendance.filter((a) => a.date !== todayStr);
       saveDatabase(db);
       return NextResponse.json({ success: true, message: `All attendance records for ${todayStr} have been reset.`, data: db });
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 7. RECORD PUNCH (STAFF LOGIN PUNCH IN / LOGOUT PUNCH OUT & CARD ACTIONS)
+    // ──────────────────────────────────────────────────────────────────────────
+    if (action === 'STAFF_PUNCH') {
+      const { staffId, type = 'auto', time, latitude, longitude } = body; // type: 'auto' | 'in' | 'out'
+      let staffMember = db.staff.find((s) => s.id === staffId);
+      if (!staffMember && userName) {
+        staffMember = db.staff.find((s) => s.fullName.toLowerCase() === userName.toLowerCase());
+      }
+      if (!staffMember) {
+        staffMember = {
+          id: staffId || `stf-${Date.now()}`,
+          employeeCode: 'UFP-EMP-01',
+          fullName: userName || 'Staff Member',
+          role: userRole || 'staff',
+          department: 'Service',
+          phone: '+91 98450 12345',
+          email: `${userName || 'staff'}@unitedfoodpalace.com`,
+          aadhaarNumber: 'XXXX-XXXX-1234',
+          familyDetails: '',
+          currentAddress: 'Vijayawada, AP',
+          permanentAddress: 'Vijayawada, AP',
+          dateOfJoining: '2025-01-15',
+          salaryType: 'monthly',
+          baseSalaryPaise: 2500000,
+          bankAccountNumber: 'XXXX1234',
+          bankIfsc: 'HDFC0001234',
+          bankName: 'HDFC Bank',
+          emergencyContactName: 'Family',
+          emergencyContactPhone: '+91 98450 00000',
+          photoUrl: '',
+          hasFaceEnrolled: false,
+          isActive: true,
+        };
+        db.staff.push(staffMember);
+      }
+
+      // Check Geofence if location is configured
+      const locationConfig = db.settings?.attendanceLocation;
+      let punchDistance: number | undefined;
+      if (locationConfig && locationConfig.enabled) {
+        if (latitude !== undefined && longitude !== undefined && !isNaN(Number(latitude)) && !isNaN(Number(longitude))) {
+          punchDistance = calculateDistanceInMeters(
+            Number(latitude),
+            Number(longitude),
+            locationConfig.latitude,
+            locationConfig.longitude
+          );
+
+          if (punchDistance > locationConfig.radiusMeters) {
+            return NextResponse.json({
+              success: false,
+              geofenceRestricted: true,
+              distance: punchDistance,
+              allowedRadius: locationConfig.radiusMeters,
+              message: `📍 Attendance Rejected: Outside geofence (${formatDistance(punchDistance)} away). Maximum allowed radius is ${locationConfig.radiusMeters}m from ${locationConfig.locationName || 'the premises'}.`,
+            }, { status: 403 });
+          }
+        }
+      }
+
+      const assignedShift = getShiftForStaff(staffMember, db.shifts);
+      const currentTimeStr = time || new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+      const existingLog = db.attendance.find(
+        (a) => (a.staffId === staffMember!.id || a.staffName.toLowerCase() === staffMember!.fullName.toLowerCase()) && a.date === todayStr
+      );
+
+      if (type === 'out' || (type === 'auto' && existingLog && !existingLog.checkOutTime)) {
+        // Record Punch Out
+        if (existingLog) {
+          const hours = calculateShiftHours(existingLog.checkInTime, currentTimeStr);
+          const departure = calculateDeparture(currentTimeStr, assignedShift);
+
+          existingLog.checkOutTime = currentTimeStr;
+          existingLog.hoursWorked = hours;
+          existingLog.leftEarly = departure.leftEarly;
+          existingLog.leftEarlyMinutes = departure.leftEarlyMinutes;
+          existingLog.isOvertime = departure.isOvertime;
+          existingLog.overtimeMinutes = departure.overtimeMinutes;
+          if (latitude !== undefined && longitude !== undefined) {
+            existingLog.verifiedLatitude = Number(latitude);
+            existingLog.verifiedLongitude = Number(longitude);
+            existingLog.distanceMeters = punchDistance;
+            existingLog.isLocationVerified = true;
+          }
+
+          logAudit(db, staffMember.fullName, 'staff', 'UPDATE', 'ATTENDANCE', staffMember.employeeCode, {
+            newValue: `Punched OUT at ${currentTimeStr} (${hours} hrs worked)`,
+            reason: `Staff Logout / Punch Out (${departure.message})`,
+          });
+          saveDatabase(db);
+          return NextResponse.json({
+            success: true,
+            punchType: 'punch_out',
+            checkInTime: existingLog.checkInTime,
+            checkOutTime: currentTimeStr,
+            hoursWorked: hours,
+            message: `Punch Out recorded at ${currentTimeStr} (${hours} hrs worked)`,
+            data: db,
+          });
+        }
+      } else if (type === 'in' || (type === 'auto' && !existingLog)) {
+        // Record Punch In
+        if (!existingLog) {
+          const punctuality = calculatePunctuality(currentTimeStr, assignedShift);
+          const newLog: AttendanceLog = {
+            id: `att-${todayStr}-${staffMember.id}`,
+            staffId: staffMember.id,
+            staffName: staffMember.fullName,
+            staffRole: staffMember.role,
+            staffPhotoUrl: staffMember.photoUrl,
+            date: todayStr,
+            checkInTime: currentTimeStr,
+            hoursWorked: 0,
+            status: punctuality.status,
+            verificationMethod: 'face_qr',
+            shiftId: assignedShift.id,
+            shiftName: assignedShift.name,
+            shiftTiming: `${assignedShift.startTime} - ${assignedShift.endTime}`,
+            isLate: punctuality.isLate,
+            lateMinutes: punctuality.lateMinutes,
+            verifiedLatitude: latitude !== undefined ? Number(latitude) : undefined,
+            verifiedLongitude: longitude !== undefined ? Number(longitude) : undefined,
+            distanceMeters: punchDistance,
+            isLocationVerified: punchDistance !== undefined && punchDistance <= (locationConfig?.radiusMeters || 150),
+            demoFlag: false,
+          };
+          db.attendance.unshift(newLog);
+          logAudit(db, staffMember.fullName, 'staff', 'CREATE', 'ATTENDANCE', staffMember.employeeCode, {
+            newValue: `Punched IN at ${currentTimeStr} (${punctuality.message})`,
+            reason: `Staff Login / Punch In (${punctuality.message})`,
+          });
+          saveDatabase(db);
+          return NextResponse.json({
+            success: true,
+            punchType: 'punch_in',
+            checkInTime: currentTimeStr,
+            message: `Punch In recorded at ${currentTimeStr}`,
+            data: db,
+          });
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        alreadyMarked: true,
+        checkInTime: existingLog?.checkInTime,
+        checkOutTime: existingLog?.checkOutTime,
+        hoursWorked: existingLog?.hoursWorked,
+        data: db,
+      });
     }
 
     return NextResponse.json({ success: false, message: 'Unknown action' }, { status: 400 });

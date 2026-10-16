@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { DatabaseSchema, BusinessSettings, User, MenuItem, UserRole } from '../lib/types';
 import { TableManagementSection } from './TableManagementSection';
+import { LocationSettingsSection } from './LocationSettingsSection';
 
 interface SettingsModuleProps {
   db: DatabaseSchema;
@@ -35,7 +36,7 @@ export const SettingsModule: React.FC<SettingsModuleProps> = ({
   onUpdateTable,
   onDeleteTable,
 }) => {
-  const [activeTab, setActiveTab] = useState<'tables' | 'access' | 'menu' | 'users' | 'business' | 'audit'>('tables');
+  const [activeTab, setActiveTab] = useState<'tables' | 'location' | 'access' | 'menu' | 'users' | 'business' | 'audit'>('tables');
 
   // Business settings state
   const [settingsForm, setSettingsForm] = useState<BusinessSettings>({ ...db.settings });
@@ -240,6 +241,17 @@ export const SettingsModule: React.FC<SettingsModuleProps> = ({
             <span>Floor &amp; Tables ({db.tables.length})</span>
           </button>
           <button
+            onClick={() => setActiveTab('location')}
+            className={`px-3 sm:px-3.5 py-1.5 rounded-apple-sm transition-all active:scale-[0.97] flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+              activeTab === 'location'
+                ? 'bg-[#05271f] text-gold-300 font-semibold shadow-apple-subtle'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[15px]">location_on</span>
+            <span>Location &amp; Geofence</span>
+          </button>
+          <button
             onClick={() => setActiveTab('menu')}
             className={`px-3 sm:px-3.5 py-1.5 rounded-apple-sm transition-all active:scale-[0.97] shrink-0 whitespace-nowrap ${
               activeTab === 'menu'
@@ -300,6 +312,15 @@ export const SettingsModule: React.FC<SettingsModuleProps> = ({
           onAddTable={onAddTable}
           onUpdateTable={onUpdateTable}
           onDeleteTable={onDeleteTable}
+        />
+      )}
+
+      {/* 2b. Sub Tab: Location & Attendance Geofence */}
+      {activeTab === 'location' && (
+        <LocationSettingsSection
+          settings={db.settings}
+          currentUser={currentUser}
+          onUpdateSettings={onUpdateSettings}
         />
       )}
 
