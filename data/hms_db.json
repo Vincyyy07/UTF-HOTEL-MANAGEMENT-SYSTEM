@@ -3550,55 +3550,7 @@
       ]
     }
   ],
-  "attendance": [
-    {
-      "id": "att-2026-10-18-stf-prince-override",
-      "staffId": "stf-prince",
-      "staffName": "PRINCE",
-      "staffRole": "Captain / Service",
-      "staffPhotoUrl": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80",
-      "date": "2026-10-18",
-      "checkInTime": "07:05 AM",
-      "checkOutTime": "03:30 PM",
-      "hoursWorked": 8.4,
-      "status": "present",
-      "verificationMethod": "manager_override",
-      "overrideReason": "Admin Sheet Update (present)",
-      "overrideBy": "Super Admin",
-      "shiftId": "shift-morning",
-      "shiftName": "Morning Shift",
-      "shiftTiming": "07:00 - 15:30",
-      "isLate": false,
-      "lateMinutes": 0,
-      "demoFlag": false
-    },
-    {
-      "id": "att-2026-10-16-prince",
-      "staffId": "stf-prince",
-      "staffName": "PRINCE",
-      "staffRole": "Captain / Service",
-      "staffPhotoUrl": "",
-      "date": "2026-10-16",
-      "hoursWorked": 0,
-      "status": "absent",
-      "verificationMethod": "manager_override",
-      "shiftName": "Morning Shift"
-    },
-    {
-      "id": "att-2026-10-17-prince",
-      "staffId": "stf-prince",
-      "staffName": "PRINCE",
-      "staffRole": "Captain / Service",
-      "staffPhotoUrl": "",
-      "date": "2026-10-17",
-      "checkInTime": "07:10 AM",
-      "checkOutTime": "03:30 PM",
-      "hoursWorked": 8.3,
-      "status": "present",
-      "verificationMethod": "face_qr",
-      "shiftName": "Morning Shift"
-    }
-  ],
+  "attendance": [],
   "leaveRequests": [],
   "suppliers": [
     {
