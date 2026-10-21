@@ -91,9 +91,10 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
   // Day Wise View: 'grid' (Calendar) | 'list' (Detailed Cards)
   const [dayWiseMode, setDayWiseMode] = useState<'grid' | 'list'>('grid');
 
-  // Month navigation (Default Oct'26)
-  const [currentMonthIndex, setCurrentMonthIndex] = useState<number>(9); // 0=Jan, 9=Oct
-  const [currentYear, setCurrentYear] = useState<number>(2026);
+  // Month navigation (Synced dynamically to current real system date)
+  const now = new Date();
+  const [currentMonthIndex, setCurrentMonthIndex] = useState<number>(now.getMonth());
+  const [currentYear, setCurrentYear] = useState<number>(now.getFullYear());
 
   // Accordion states in Overview
   const [openAccordion, setOpenAccordion] = useState<string | null>(null);
@@ -106,13 +107,13 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
 
   // Regularize Dialog Modal
   const [showRegularizeModal, setShowRegularizeModal] = useState<boolean>(false);
-  const [regularizeDate, setRegularizeDate] = useState<string>('2026-10-13');
-  const [regularizeInTime, setRegularizeInTime] = useState<string>('09:46');
-  const [regularizeOutTime, setRegularizeOutTime] = useState<string>('19:30');
-  const [regularizeReason, setRegularizeReason] = useState<string>('Forgot to punch out due to dinner rush');
+  const [regularizeDate, setRegularizeDate] = useState<string>('');
+  const [regularizeInTime, setRegularizeInTime] = useState<string>('');
+  const [regularizeOutTime, setRegularizeOutTime] = useState<string>('');
+  const [regularizeReason, setRegularizeReason] = useState<string>('');
   const [regularizeSubmitted, setRegularizeSubmitted] = useState<boolean>(false);
 
-  // Today dynamic date
+  // Today dynamic date in local YYYY-MM-DD
   const todayDateStr = useMemo(() => getLocalDateStr(new Date()), []);
 
   // Check real today log from db.attendance
@@ -124,7 +125,7 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
     );
   }, [db.attendance, currentStaff, todayDateStr]);
 
-  // Month label formatted as "Oct'26"
+  // Month label formatted as "Oct'26" or "Nov'26"
   const monthNamesShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const monthDisplayLabel = `${monthNamesShort[currentMonthIndex]}'${String(currentYear).slice(-2)}`;
 
@@ -147,20 +148,22 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
   };
 
   const handleJumpToToday = () => {
-    setCurrentMonthIndex(9); // Oct
-    setCurrentYear(2026);
+    const d = new Date();
+    setCurrentMonthIndex(d.getMonth());
+    setCurrentYear(d.getFullYear());
     const today = cycleDays.find((d) => d.isToday);
     if (today) setSelectedDayDetail(today);
   };
 
-  // Generate cycle days (Sunday is ALSO a working day in restaurants!)
+  // Generate cycle days for the current calendar month - STRICTLY REAL DATA ONLY
   const cycleDays: DayRecord[] = useMemo(() => {
     const list: DayRecord[] = [];
     const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const weekdayChars: ('S' | 'M' | 'T' | 'W' | 'T' | 'F' | 'S')[] = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
-    const startDate = new Date(currentYear, currentMonthIndex - 1, 21);
-    const endDate = new Date(currentYear, currentMonthIndex, 20);
+    const daysInMonth = new Date(currentYear, currentMonthIndex + 1, 0).getDate();
+    const startDate = new Date(currentYear, currentMonthIndex, 1);
+    const endDate = new Date(currentYear, currentMonthIndex, daysInMonth);
 
     // Filter real logs in db for this staff
     const staffLogs = (db.attendance || []).filter(
@@ -181,9 +184,8 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
       const dayOfWeek = weekdays[dayOfWeekIdx];
       const dayOfWeekChar = weekdayChars[dayOfWeekIdx];
 
-      const isGandhiJayanti = monthIdx === 9 && dayNum === 2; // 2 Oct
-      const isToday = dateStr === todayDateStr || dateStr === '2026-10-16';
-      const isFuture = curr > new Date(2026, 9, 16);
+      const isToday = dateStr === todayDateStr;
+      const isFuture = dateStr > todayDateStr;
 
       // Check if real log exists in DB
       const dbLog = staffLogs.find((l) => l.date === dateStr);
@@ -195,7 +197,9 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
           ? `${Math.floor(hrsNum)}:${String(Math.round((hrsNum % 1) * 60)).padStart(2, '0')}`
           : dbLog.checkOutTime
           ? '00:00'
-          : 'In Progress';
+          : dbLog.checkInTime
+          ? 'In Progress'
+          : '--:--';
 
         list.push({
           date: dateStr,
@@ -204,140 +208,39 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
           dayOfWeek,
           dayOfWeekChar,
           status: dbLog.status === 'absent' ? 'A' : 'P',
-          statusLabel: dbLog.status === 'absent' ? 'Absent' : 'Present',
-          shiftCode: dbLog.shiftName ? dbLog.shiftName.slice(0, 4).toUpperCase() : 'GEN2',
-          shiftName: dbLog.shiftName || 'General Shift',
+          statusLabel: dbLog.status === 'absent' ? 'Absent' : dbLog.isLate ? 'Present (Late-in)' : 'Present',
+          shiftCode: dbLog.shiftName ? dbLog.shiftName.slice(0, 4).toUpperCase() : 'SHFT',
+          shiftName: dbLog.shiftName || 'Assigned Shift',
           firstIn: dbLog.checkInTime || '--:--',
           lastOut: dbLog.checkOutTime || '--:--',
           actualWorkHrs: hrsStr,
-          workMinutes: hrsNum ? Math.round(hrsNum * 60) : 480,
-          isLate: dbLog.isLate,
-          lateMinutes: dbLog.lateMinutes,
-          isEarlyOut: dbLog.leftEarly,
-          earlyMinutes: dbLog.leftEarlyMinutes,
-          hasExceptionMark: dbLog.isLate || dbLog.leftEarly,
+          workMinutes: hrsNum ? Math.round(hrsNum * 60) : 0,
+          isLate: Boolean(dbLog.isLate),
+          lateMinutes: dbLog.lateMinutes || 0,
+          isEarlyOut: Boolean(dbLog.leftEarly),
+          earlyMinutes: dbLog.leftEarlyMinutes || 0,
+          hasExceptionMark: Boolean(dbLog.checkInTime && !dbLog.checkOutTime && dateStr < todayDateStr),
           isToday,
           isFuture: false,
         });
       } else {
-        // SUNDAYS ARE REGULAR WORKING DAYS!
-        if (isGandhiJayanti) {
+        // NO DB LOG RECORDED FOR THIS DAY: strictly show real empty state (no fake mock times)
+        if (isToday) {
           list.push({
             date: dateStr,
             dayNum,
             monthLabel,
             dayOfWeek,
             dayOfWeekChar,
-            status: 'H',
-            statusLabel: 'Holiday (Gandhi Jayanti)',
-            shiftCode: 'GEN2',
-            shiftName: 'National Holiday',
-            isToday,
-            isFuture,
-          });
-        } else if (dateStr === '2026-10-12') {
-          list.push({
-            date: dateStr,
-            dayNum,
-            monthLabel,
-            dayOfWeek,
-            dayOfWeekChar,
-            status: 'P',
-            statusLabel: 'Present (Late-in)',
-            shiftCode: 'GEN2',
-            shiftName: 'Ack & Grw',
-            firstIn: '10:18',
-            lastOut: '22:45',
-            actualWorkHrs: '12:27',
-            workMinutes: 747,
-            isLate: true,
-            lateMinutes: 48,
-            hasExceptionMark: false,
-            isToday,
-            isFuture,
-          });
-        } else if (dateStr === '2026-10-13') {
-          list.push({
-            date: dateStr,
-            dayNum,
-            monthLabel,
-            dayOfWeek,
-            dayOfWeekChar,
-            status: 'P',
-            statusLabel: 'Present (Single Punch)',
-            shiftCode: 'GEN2',
-            shiftName: 'Ack & Grw',
-            firstIn: '09:46',
-            lastOut: '09:46',
-            actualWorkHrs: '00:00',
+            status: 'A',
+            statusLabel: 'Not Checked In Yet',
+            shiftCode: 'SHFT',
+            shiftName: 'Today Shift',
+            firstIn: '--:--',
+            lastOut: '--:--',
+            actualWorkHrs: '--',
             workMinutes: 0,
-            isLate: true,
-            lateMinutes: 16,
-            hasExceptionMark: true,
-            isToday,
-            isFuture,
-          });
-        } else if (dateStr === '2026-10-14') {
-          list.push({
-            date: dateStr,
-            dayNum,
-            monthLabel,
-            dayOfWeek,
-            dayOfWeekChar,
-            status: 'P',
-            statusLabel: 'Present',
-            shiftCode: 'GEN2',
-            shiftName: 'Ack & Grw',
-            firstIn: '09:59',
-            lastOut: '23:00',
-            actualWorkHrs: '13:01',
-            workMinutes: 781,
             isLate: false,
-            hasExceptionMark: false,
-            isToday,
-            isFuture,
-          });
-        } else if (dateStr === '2026-10-15') {
-          list.push({
-            date: dateStr,
-            dayNum,
-            monthLabel,
-            dayOfWeek,
-            dayOfWeekChar,
-            status: 'P',
-            statusLabel: 'Present',
-            shiftCode: 'GEN2',
-            shiftName: 'Ack & Grw',
-            firstIn: '10:44',
-            lastOut: '23:02',
-            actualWorkHrs: '12:18',
-            workMinutes: 738,
-            isLate: true,
-            lateMinutes: 74,
-            hasExceptionMark: true,
-            isToday,
-            isFuture,
-          });
-        } else if (isToday) {
-          // Live Today record: check if dbLog has punches or defaults to active shift
-          const hasDbCheckIn = todayDbLog?.checkInTime;
-          const hasDbCheckOut = todayDbLog?.checkOutTime;
-
-          list.push({
-            date: dateStr,
-            dayNum,
-            monthLabel,
-            dayOfWeek,
-            dayOfWeekChar,
-            status: 'P',
-            statusLabel: hasDbCheckOut ? 'Shift Completed' : hasDbCheckIn ? 'Present (Active)' : 'Shift Active',
-            shiftCode: 'GEN2',
-            shiftName: 'General Shift',
-            firstIn: hasDbCheckIn || '09:46',
-            lastOut: hasDbCheckOut || '--:--',
-            actualWorkHrs: todayDbLog?.hoursWorked ? `${todayDbLog.hoursWorked} hrs` : hasDbCheckOut ? '08:15' : 'In Progress',
-            workMinutes: 495,
-            isLate: todayDbLog?.isLate || false,
             hasExceptionMark: false,
             isToday: true,
             isFuture: false,
@@ -349,38 +252,36 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
             monthLabel,
             dayOfWeek,
             dayOfWeekChar,
-            status: 'P',
+            status: 'A',
             statusLabel: 'Scheduled',
-            shiftCode: 'GEN2',
-            shiftName: 'General Shift',
+            shiftCode: 'SHFT',
+            shiftName: 'Scheduled Shift',
+            firstIn: '--:--',
+            lastOut: '--:--',
+            actualWorkHrs: '--',
+            workMinutes: 0,
+            isLate: false,
+            hasExceptionMark: false,
             isToday: false,
             isFuture: true,
           });
         } else {
-          // Regular past working days (including Sundays)
-          const lateDays = ['2026-09-24', '2026-09-29', '2026-10-05'];
-          const earlyDays = ['2026-09-28', '2026-10-10'];
-          const isLate = lateDays.includes(dateStr);
-          const isEarlyOut = earlyDays.includes(dateStr);
-
+          // Past unpunched day
           list.push({
             date: dateStr,
             dayNum,
             monthLabel,
             dayOfWeek,
             dayOfWeekChar,
-            status: 'P',
-            statusLabel: 'Present',
-            shiftCode: 'GEN2',
-            shiftName: 'General Shift',
-            firstIn: isLate ? '10:15' : '09:30',
-            lastOut: isEarlyOut ? '18:20' : '21:30',
-            actualWorkHrs: '12:00',
-            workMinutes: 720,
-            isLate,
-            lateMinutes: isLate ? 45 : 0,
-            isEarlyOut,
-            earlyMinutes: isEarlyOut ? 40 : 0,
+            status: 'A',
+            statusLabel: 'Absent (No Punch)',
+            shiftCode: 'SHFT',
+            shiftName: 'Missed Shift',
+            firstIn: '--:--',
+            lastOut: '--:--',
+            actualWorkHrs: '--',
+            workMinutes: 0,
+            isLate: false,
             hasExceptionMark: false,
             isToday: false,
             isFuture: false,
@@ -392,13 +293,11 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
     }
 
     return list;
-  }, [currentYear, currentMonthIndex, db.attendance, currentStaff, todayDateStr, todayDbLog]);
+  }, [currentYear, currentMonthIndex, db.attendance, currentStaff, todayDateStr]);
 
-  // Aggregate stats (Sundays are full working days!)
+  // Aggregate stats strictly derived from real logs
   const stats = useMemo(() => {
     let presentCount = 0;
-    let holidayCount = 0;
-    let restDayCount = 0;
     let absentCount = 0;
     let lateInCount = 0;
     let earlyOutCount = 0;
@@ -410,11 +309,7 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
       if (d.status === 'P') {
         presentCount++;
         if (d.workMinutes) totalWorkMinutes += d.workMinutes;
-      } else if (d.status === 'H') {
-        holidayCount++;
-      } else if (d.status === 'WO') {
-        restDayCount++;
-      } else if (d.status === 'A') {
+      } else if (!d.isToday) {
         absentCount++;
       }
 
@@ -423,45 +318,44 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
       if (d.hasExceptionMark) exceptionCount++;
     });
 
-    const avgMinutes = presentCount > 0 ? Math.round(totalWorkMinutes / presentCount) : 690;
+    const avgMinutes = presentCount > 0 ? Math.round(totalWorkMinutes / presentCount) : 0;
     const avgHours = Math.floor(avgMinutes / 60);
     const avgRemMins = avgMinutes % 60;
-    const avgWorkHoursFormatted = `${String(avgHours).padStart(2, '0')}:${String(avgRemMins).padStart(2, '0')}`;
+    const avgWorkHoursFormatted = presentCount > 0
+      ? `${String(avgHours).padStart(2, '0')}:${String(avgRemMins).padStart(2, '0')}`
+      : '--:--';
 
     return {
-      present: presentCount || 24,
-      holiday: holidayCount || 1,
-      restDay: restDayCount || 0,
-      absent: absentCount || 0,
-      workingDays: presentCount || 24,
-      lateInDays: lateInCount || 6,
-      earlyOutDays: earlyOutCount || 2,
-      exceptionDays: exceptionCount || 2,
-      deductionDays: 3,
+      present: presentCount,
+      holiday: 0,
+      restDay: 0,
+      absent: absentCount,
+      workingDays: presentCount,
+      lateInDays: lateInCount,
+      earlyOutDays: earlyOutCount,
+      exceptionDays: exceptionCount,
+      deductionDays: absentCount,
       avgWorkHours: avgWorkHoursFormatted,
     };
   }, [cycleDays]);
 
-  // SVG Pie/Donut Chart calculation
+  // SVG Pie/Donut Chart calculation strictly from real stats
   const donutData = useMemo(() => {
-    const total = stats.present + stats.holiday + stats.restDay + (stats.absent || 0);
-    if (total === 0) return { presentPct: 96, holidayPct: 4, restPct: 0, absentPct: 0 };
+    const total = stats.present + stats.absent;
+    if (total === 0) return { presentPct: 0, holidayPct: 0, restPct: 0, absentPct: 0 };
 
-    const presentPct = (stats.present / total) * 100;
-    const holidayPct = (stats.holiday / total) * 100;
-    const restPct = (stats.restDay / total) * 100;
-    const absentPct = ((stats.absent || 0) / total) * 100;
+    const presentPct = Math.round((stats.present / total) * 100);
+    const absentPct = 100 - presentPct;
 
-    return { presentPct, holidayPct, restPct, absentPct };
+    return { presentPct, holidayPct: 0, restPct: 0, absentPct };
   }, [stats]);
 
   // Live Today values
   const todayRecord = useMemo(() => {
-    const fromCycle = cycleDays.find((d) => d.isToday);
-    const checkIn = todayDbLog?.checkInTime || (fromCycle?.firstIn && fromCycle.firstIn !== '--:--' ? fromCycle.firstIn : null) || '--:--';
-    const checkOut = todayDbLog?.checkOutTime || (fromCycle?.lastOut && fromCycle.lastOut !== '--:--' ? fromCycle.lastOut : null) || '--:--';
+    const checkIn = todayDbLog?.checkInTime || '--:--';
+    const checkOut = todayDbLog?.checkOutTime || '--:--';
     const isCompleted = Boolean(todayDbLog?.checkOutTime && todayDbLog.checkOutTime !== '--:--');
-    const isPunchedIn = Boolean((todayDbLog?.checkInTime && todayDbLog.checkInTime !== '--:--') || (checkIn && checkIn !== '--:--'));
+    const isPunchedIn = Boolean(todayDbLog?.checkInTime && todayDbLog.checkInTime !== '--:--');
 
     let actualWorkHrs = '--:--';
     if (todayDbLog?.hoursWorked) {
@@ -470,20 +364,23 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
       actualWorkHrs = 'On Duty (Active)';
     } else if (isCompleted) {
       actualWorkHrs = 'Shift Completed';
-    } else if (fromCycle?.actualWorkHrs) {
-      actualWorkHrs = fromCycle.actualWorkHrs;
     }
+
+    const assignedShiftName = currentStaff.assignedShiftId
+      ? db.shifts?.find((s) => s.id === currentStaff.assignedShiftId)?.name
+      : 'Assigned Shift';
 
     return {
       firstIn: checkIn,
       lastOut: checkOut,
       actualWorkHrs,
-      shiftName: todayDbLog?.shiftName || fromCycle?.shiftName || 'General Shift (09:30 - 19:30)',
-      isLate: todayDbLog?.isLate || fromCycle?.isLate || false,
+      shiftName: todayDbLog?.shiftName || assignedShiftName || 'Assigned Shift',
+      isLate: Boolean(todayDbLog?.isLate),
+      lateMinutes: todayDbLog?.lateMinutes || 0,
       isPunchedIn,
       isCompleted,
     };
-  }, [cycleDays, todayDbLog]);
+  }, [todayDbLog, currentStaff, db.shifts]);
 
   // Calendar Grid Cells with Day of Week Alignment
   const calendarGrid = useMemo(() => {
@@ -567,8 +464,14 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
             </div>
 
             {todayRecord.isPunchedIn ? (
-              <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shrink-0">
-                {todayRecord.isLate ? 'Late Arrival' : 'On Time'}
+              <span
+                className={`px-2.5 py-1 rounded-full text-[11px] font-bold border shrink-0 ${
+                  todayRecord.isLate
+                    ? 'bg-amber-100 text-amber-900 border-amber-300'
+                    : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                }`}
+              >
+                {todayRecord.isLate ? `Late Arrival (${todayRecord.lateMinutes}m)` : 'On Time'}
               </span>
             ) : (
               <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
@@ -885,11 +788,11 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
                 <div className="p-4 pt-0 text-xs text-slate-600 border-t border-slate-100/80 bg-white space-y-2">
                   <div className="flex justify-between py-1 border-b border-slate-100">
                     <span>Unpaid Absence Deductions</span>
-                    <strong className="text-slate-800">2 Days</strong>
+                    <strong className="text-slate-800">{stats.deductionDays} Days</strong>
                   </div>
                   <div className="flex justify-between py-1 border-b border-slate-100">
-                    <span>Cumulative Half-day Penalties</span>
-                    <strong className="text-slate-800">1 Day</strong>
+                    <span>Late In Records</span>
+                    <strong className="text-slate-800">{stats.lateInDays} Days</strong>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-1 italic">
                     Deductions are computed automatically from missed shift punches or unapproved leaves.
@@ -922,32 +825,26 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
 
               {openAccordion === 'late' && (
                 <div className="p-4 pt-0 text-xs text-slate-600 border-t border-slate-100/80 bg-white space-y-2">
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between py-1 border-b border-slate-100">
-                      <span>15 Oct (Thu) • In: 10:44</span>
-                      <strong className="text-amber-700 font-bold">Late by 74 mins</strong>
+                  {cycleDays.filter((d) => d.isLate).length === 0 ? (
+                    <div className="py-3 text-center text-slate-400 italic">
+                      No late arrivals recorded this cycle. Excellent punctuality!
                     </div>
-                    <div className="flex justify-between py-1 border-b border-slate-100">
-                      <span>13 Oct (Tue) • In: 09:46</span>
-                      <strong className="text-amber-700 font-bold">Late by 16 mins</strong>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {cycleDays
+                        .filter((d) => d.isLate)
+                        .map((d) => (
+                          <div key={d.date} className="flex justify-between py-1 border-b border-slate-100">
+                            <span>
+                              {d.dayNum} {d.monthLabel} ({d.dayOfWeek.slice(0, 3)}) • In: {d.firstIn}
+                            </span>
+                            <strong className="text-amber-700 font-bold">
+                              Late by {d.lateMinutes || 0} mins
+                            </strong>
+                          </div>
+                        ))}
                     </div>
-                    <div className="flex justify-between py-1 border-b border-slate-100">
-                      <span>12 Oct (Mon) • In: 10:18</span>
-                      <strong className="text-amber-700 font-bold">Late by 48 mins</strong>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-slate-100">
-                      <span>05 Oct (Mon) • In: 09:55</span>
-                      <strong className="text-amber-700 font-bold">Late by 25 mins</strong>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-slate-100">
-                      <span>29 Sep (Tue) • In: 10:05</span>
-                      <strong className="text-amber-700 font-bold">Late by 35 mins</strong>
-                    </div>
-                    <div className="flex justify-between py-1 border-b border-slate-100">
-                      <span>24 Sep (Thu) • In: 10:15</span>
-                      <strong className="text-amber-700 font-bold">Late by 45 mins</strong>
-                    </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>
@@ -976,16 +873,26 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
 
               {openAccordion === 'early' && (
                 <div className="p-4 pt-0 text-xs text-slate-600 border-t border-slate-100/80 bg-white space-y-2">
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between py-1 border-b border-slate-100">
-                      <span>10 Oct (Sat) • Out: 18:30 (Scheduled 19:30)</span>
-                      <strong className="text-amber-700 font-bold">Left early by 60 mins</strong>
+                  {cycleDays.filter((d) => d.isEarlyOut).length === 0 ? (
+                    <div className="py-3 text-center text-slate-400 italic">
+                      No early departures recorded this cycle.
                     </div>
-                    <div className="flex justify-between py-1 border-b border-slate-100">
-                      <span>28 Sep (Mon) • Out: 18:20 (Scheduled 19:30)</span>
-                      <strong className="text-amber-700 font-bold">Left early by 70 mins</strong>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {cycleDays
+                        .filter((d) => d.isEarlyOut)
+                        .map((d) => (
+                          <div key={d.date} className="flex justify-between py-1 border-b border-slate-100">
+                            <span>
+                              {d.dayNum} {d.monthLabel} ({d.dayOfWeek.slice(0, 3)}) • Out: {d.lastOut}
+                            </span>
+                            <strong className="text-amber-700 font-bold">
+                              Left early by {d.earlyMinutes || 0} mins
+                            </strong>
+                          </div>
+                        ))}
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1014,41 +921,38 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
 
               {openAccordion === 'exception' && (
                 <div className="p-4 pt-0 text-xs text-slate-600 border-t border-slate-100/80 bg-white space-y-2">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
-                      <div>
-                        <strong className="text-slate-900 block">13 Oct (Tue) • Single Punch</strong>
-                        <span className="text-[11px] text-slate-500">In: 09:46 | Out: 09:46 (00:00 worked)</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRegularizeDate('2026-10-13');
-                          setShowRegularizeModal(true);
-                        }}
-                        className="px-2.5 py-1 rounded bg-indigo-50 text-indigo-700 font-bold text-xs hover:bg-indigo-100"
-                      >
-                        Fix
-                      </button>
+                  {cycleDays.filter((d) => d.hasExceptionMark).length === 0 ? (
+                    <div className="py-3 text-center text-slate-400 italic">
+                      No punch exceptions recorded. All punches are verified.
                     </div>
-
-                    <div className="flex items-center justify-between py-1.5">
-                      <div>
-                        <strong className="text-slate-900 block">15 Oct (Thu) • Extended Punch</strong>
-                        <span className="text-[11px] text-slate-500">In: 10:44 | Out: 23:02 (12:18 worked)</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRegularizeDate('2026-10-15');
-                          setShowRegularizeModal(true);
-                        }}
-                        className="px-2.5 py-1 rounded bg-indigo-50 text-indigo-700 font-bold text-xs hover:bg-indigo-100"
-                      >
-                        Fix
-                      </button>
+                  ) : (
+                    <div className="space-y-2">
+                      {cycleDays
+                        .filter((d) => d.hasExceptionMark)
+                        .map((d) => (
+                          <div key={d.date} className="flex items-center justify-between py-1.5 border-b border-slate-100">
+                            <div>
+                              <strong className="text-slate-900 block">
+                                {d.dayNum} {d.monthLabel} ({d.dayOfWeek.slice(0, 3)}) • Missing Punch Out
+                              </strong>
+                              <span className="text-[11px] text-slate-500">
+                                In: {d.firstIn} | Out: Missing
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRegularizeDate(d.date);
+                                setShowRegularizeModal(true);
+                              }}
+                              className="px-2.5 py-1 rounded bg-indigo-50 text-indigo-700 font-bold text-xs hover:bg-indigo-100"
+                            >
+                              Fix
+                            </button>
+                          </div>
+                        ))}
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1133,7 +1037,8 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
                   }
 
                   const isHoliday = day.status === 'H';
-                  const isLateOrPeach = day.date === '2026-10-12' || day.date === '2026-10-13';
+                  const isAbsent = day.status === 'A' && !day.isFuture && !day.isToday;
+                  const isLateOrPeach = day.isLate;
                   const isToday = day.isToday;
 
                   let cellBg = 'bg-[#F2F9F4] border-emerald-100/80'; // soft green working day
@@ -1142,6 +1047,9 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
                   if (isHoliday) {
                     cellBg = 'bg-[#EBF8FA] border-cyan-200/80';
                     letterColor = 'text-cyan-800';
+                  } else if (isAbsent) {
+                    cellBg = 'bg-rose-50/70 border-rose-200/80';
+                    letterColor = 'text-rose-700';
                   } else if (isLateOrPeach) {
                     cellBg = 'bg-[#FFEED9] border-orange-200/80';
                     letterColor = 'text-amber-900';
@@ -1208,7 +1116,8 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
                 .reverse()
                 .map((day) => {
                   const isHoliday = day.status === 'H';
-                  const isLateOrPeach = day.date === '2026-10-12' || day.date === '2026-10-13';
+                  const isAbsent = day.status === 'A';
+                  const isLateOrPeach = day.isLate;
 
                   let cardBg = 'bg-[#F2F9F4] border-emerald-200/90';
                   let headerBadge = 'text-emerald-800';
@@ -1216,6 +1125,9 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
                   if (isHoliday) {
                     cardBg = 'bg-[#EBF8FA] border-cyan-200';
                     headerBadge = 'text-cyan-800';
+                  } else if (isAbsent) {
+                    cardBg = 'bg-rose-50/70 border-rose-200';
+                    headerBadge = 'text-rose-700';
                   } else if (isLateOrPeach) {
                     cardBg = 'bg-[#FFEED9] border-orange-200';
                     headerBadge = 'text-amber-800';
@@ -1293,7 +1205,7 @@ export const StaffAttendanceInfo: React.FC<StaffAttendanceInfoProps> = ({
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">
-                  {selectedDayDetail.dayNum} {selectedDayDetail.monthLabel} 2026
+                  {selectedDayDetail.dayNum} {selectedDayDetail.monthLabel} {selectedDayDetail.date.split('-')[0]}
                 </h3>
                 <p className="text-xs text-slate-500 font-medium">
                   {selectedDayDetail.dayOfWeek} • {selectedDayDetail.shiftName}

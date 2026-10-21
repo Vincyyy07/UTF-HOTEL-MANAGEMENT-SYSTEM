@@ -6,7 +6,7 @@ export const DEFAULT_SHIFTS: ShiftConfig[] = [
     name: 'Morning Shift',
     startTime: '07:00',
     endTime: '15:30',
-    gracePeriodMinutes: 15,
+    gracePeriodMinutes: 5,
     halfDayHours: 4.0,
     color: 'emerald',
     description: 'Breakfast & lunch prep, cooking & dining service',
@@ -16,7 +16,7 @@ export const DEFAULT_SHIFTS: ShiftConfig[] = [
     name: 'General Shift',
     startTime: '10:00',
     endTime: '19:00',
-    gracePeriodMinutes: 15,
+    gracePeriodMinutes: 5,
     halfDayHours: 4.5,
     color: 'blue',
     description: 'Management, accounts, cash register & core day operations',
@@ -26,7 +26,7 @@ export const DEFAULT_SHIFTS: ShiftConfig[] = [
     name: 'Evening Shift',
     startTime: '15:00',
     endTime: '23:30',
-    gracePeriodMinutes: 15,
+    gracePeriodMinutes: 5,
     halfDayHours: 4.0,
     color: 'amber',
     description: 'Dinner rush, banquet dining, kitchen closing & billing',
@@ -36,7 +36,7 @@ export const DEFAULT_SHIFTS: ShiftConfig[] = [
     name: 'Night Shift',
     startTime: '18:00',
     endTime: '02:00',
-    gracePeriodMinutes: 15,
+    gracePeriodMinutes: 5,
     halfDayHours: 4.0,
     color: 'purple',
     description: 'Night bar service, deep kitchen sanitation & night security',
@@ -126,7 +126,7 @@ export function calculatePunctuality(
   if (diff < -720) diff += 1440;
   if (diff > 720) diff -= 1440;
 
-  const grace = shift.gracePeriodMinutes || 15;
+  const grace = shift.gracePeriodMinutes !== undefined ? shift.gracePeriodMinutes : 5;
 
   if (diff > grace) {
     return {
@@ -134,7 +134,7 @@ export function calculatePunctuality(
       lateMinutes: diff,
       status: 'late',
       diffMinutes: diff,
-      message: `Late by ${diff}m (${shift.name} started at ${format24To12(shift.startTime)}, grace ${grace}m)`,
+      message: `Late arrival by ${diff}m (${shift.name} started at ${format24To12(shift.startTime)})`,
     };
   }
 

@@ -37,6 +37,10 @@ export function getDatabase(): DatabaseSchema {
     const raw = fs.readFileSync(DB_FILE, 'utf-8');
     const parsed = JSON.parse(raw) as DatabaseSchema;
     let modified = false;
+    if (!parsed.attendance) {
+      parsed.attendance = [];
+      modified = true;
+    }
     if (!parsed.shifts || parsed.shifts.length === 0) {
       parsed.shifts = DEFAULT_SHIFTS;
       modified = true;

@@ -29,9 +29,9 @@ export const MonthlyAttendanceRoster: React.FC<MonthlyAttendanceRosterProps> = (
   currentUser,
   onUpdateDb,
 }) => {
-  // Navigation Month / Year (Default Oct 2026)
-  const [currentYear, setCurrentYear] = useState<number>(2026);
-  const [currentMonthIndex, setCurrentMonthIndex] = useState<number>(9); // 0=Jan, 9=Oct
+  // Navigation Month / Year (Real-time dynamic Date)
+  const [currentYear, setCurrentYear] = useState<number>(new Date().getFullYear());
+  const [currentMonthIndex, setCurrentMonthIndex] = useState<number>(new Date().getMonth());
 
   // View Mode: 'attendance' (PRE/ABSEN) | 'roster' (Shifts) | 'combined'
   const [viewMode, setViewMode] = useState<ViewMode>('attendance');
@@ -70,11 +70,11 @@ export const MonthlyAttendanceRoster: React.FC<MonthlyAttendanceRosterProps> = (
       const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
       const dd = String(day).padStart(2, '0');
       const dateStr = `${yyyy}-${mm}-${dd}`;
-      const dateDisplay = `${dd}-${mm}-${yyyy}`; // Matching user's Excel header e.g. 16-10-2026
+      const dateDisplay = `${dd}-${mm}-${yyyy}`; // E.g. 21-10-2026
       const dayOfWeek = weekdaysShort[dateObj.getDay()];
       const isSunday = dateObj.getDay() === 0;
       const isToday = dateStr === todayDateStr;
-      const isFuture = dateObj > new Date(2026, 9, 16);
+      const isFuture = dateStr > todayDateStr;
 
       days.push({
         dayNum: day,
@@ -147,7 +147,7 @@ export const MonthlyAttendanceRoster: React.FC<MonthlyAttendanceRosterProps> = (
         ? 'HD'
         : isPresent
         ? 'PRE'
-        : 'PRE';
+        : 'ABSEN';
 
       return {
         hasRecord: true,
@@ -155,28 +155,11 @@ export const MonthlyAttendanceRoster: React.FC<MonthlyAttendanceRosterProps> = (
         statusBadge,
         checkIn: log.checkInTime || '--:--',
         checkOut: log.checkOutTime || '--:--',
-        hoursWorked: log.hoursWorked || (isAbsent ? 0 : 8.0),
+        hoursWorked: log.hoursWorked || 0,
         shift: assignedShift,
         shiftCode: log.shiftName ? log.shiftName.split(' ')[0].toUpperCase() : shiftCode,
-        isLate: log.isLate,
+        isLate: Boolean(log.isLate),
         isOverride: log.verificationMethod === 'manager_override',
-      };
-    }
-
-    // Default mock behavior if not explicitly in DB
-    // Prince on 16-10-2026: ABSEN, on 17-10-2026: PRE (matching screenshot)
-    if (staff.fullName.toUpperCase() === 'PRINCE' && day.dateStr === '2026-10-16') {
-      return {
-        hasRecord: false,
-        status: 'absent',
-        statusBadge: 'ABSEN',
-        checkIn: '--:--',
-        checkOut: '--:--',
-        hoursWorked: 0,
-        shift: assignedShift,
-        shiftCode,
-        isLate: false,
-        isOverride: false,
       };
     }
 
@@ -195,14 +178,29 @@ export const MonthlyAttendanceRoster: React.FC<MonthlyAttendanceRosterProps> = (
       };
     }
 
-    // Regular past restaurant working day: default to PRE (Present)
+    if (day.isToday) {
+      return {
+        hasRecord: false,
+        status: 'not_punched',
+        statusBadge: '--',
+        checkIn: '--:--',
+        checkOut: '--:--',
+        hoursWorked: 0,
+        shift: assignedShift,
+        shiftCode,
+        isLate: false,
+        isOverride: false,
+      };
+    }
+
+    // Past unpunched day: strictly ABSEN with no default check-in/out times
     return {
       hasRecord: false,
-      status: 'present',
-      statusBadge: 'PRE',
-      checkIn: assignedShift.startTime,
-      checkOut: assignedShift.endTime,
-      hoursWorked: 8.0,
+      status: 'absent',
+      statusBadge: 'ABSEN',
+      checkIn: '--:--',
+      checkOut: '--:--',
+      hoursWorked: 0,
       shift: assignedShift,
       shiftCode,
       isLate: false,
@@ -221,7 +219,7 @@ export const MonthlyAttendanceRoster: React.FC<MonthlyAttendanceRosterProps> = (
       const data = getCellData(staff, d);
       if (data.statusBadge === 'PRE') {
         presentDays++;
-        totalHours += data.hoursWorked || 8.0;
+        totalHours += data.hoursWorked || 0;
       } else if (data.statusBadge === 'ABSEN') {
         absentDays++;
       }
@@ -417,9 +415,10 @@ export const MonthlyAttendanceRoster: React.FC<MonthlyAttendanceRosterProps> = (
             <button
               type="button"
               onClick={() => {
-                setCurrentMonthIndex(9); // Oct
-                setCurrentYear(2026);
-                const todayEl = document.getElementById('col-date-2026-10-16');
+                const now = new Date();
+                setCurrentMonthIndex(now.getMonth());
+                setCurrentYear(now.getFullYear());
+                const todayEl = document.getElementById(`col-date-${todayDateStr}`);
                 if (todayEl) {
                   todayEl.scrollIntoView({ behavior: 'smooth', inline: 'center' });
                 }

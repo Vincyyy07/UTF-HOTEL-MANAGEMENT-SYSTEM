@@ -153,30 +153,13 @@ export default function HMSApp() {
                 (a: any) => (a.staffId === found.id || a.staffName?.toLowerCase() === found.name?.toLowerCase()) && a.date === todayStr
               );
               // If staff member already completed shift / punched out today, don't auto-restore session
-              if (found.role !== 'admin' && userAtt && userAtt.checkOutTime) {
+              if (found.role !== 'admin' && userAtt && userAtt.checkOutTime && userAtt.checkOutTime !== '--:--') {
                 try {
                   localStorage.removeItem('hms_auth_user_id');
                   localStorage.setItem('hms_logged_out', 'true');
                 } catch {}
               } else {
                 setCurrentUser(found);
-                // Also trigger punch-in if this staff has not checked in today yet
-                if (found.role !== 'admin' && !userAtt) {
-                  fetch('/api/attendance', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      action: 'STAFF_PUNCH',
-                      type: 'in',
-                      staffId: found.id,
-                      userName: found.name,
-                      userRole: found.role,
-                    }),
-                  })
-                    .then((r) => r.json())
-                    .then((res) => { if (res.success && res.data) setDb(res.data); })
-                    .catch((err) => console.warn('Attendance auto-login check-in:', err));
-                }
               }
             }
           }
@@ -206,67 +189,14 @@ export default function HMSApp() {
     if (initialTab) {
       setActiveTab(initialTab);
     }
-
-    // Automatically record Check-In for staff roles when they log in
-    if (user.role !== 'admin') {
-      getCurrentBrowserPosition(2500).then((coords) => {
-        fetch('/api/attendance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'STAFF_PUNCH',
-            type: 'in',
-            staffId: user.id,
-            userName: user.name,
-            userRole: user.role,
-            latitude: coords?.latitude,
-            longitude: coords?.longitude,
-          }),
-        })
-          .then((res) => res.json())
-          .then((json) => {
-            if (json.success && json.data) {
-              setDb(json.data);
-            }
-          })
-          .catch((err) => console.warn('Attendance login check-in note:', err));
-      });
-    }
   };
 
-  const handleLogout = (skipPunch = false) => {
-    const userLoggingOut = currentUser;
+  const handleLogout = () => {
     setCurrentUser(null);
     try {
       localStorage.removeItem('hms_auth_user_id');
       localStorage.setItem('hms_logged_out', 'true');
     } catch {}
-
-    // Automatically record Check-Out for staff roles when they log out (unless already punched out via 2nd scan)
-    if (!skipPunch && userLoggingOut && userLoggingOut.role !== 'admin') {
-      getCurrentBrowserPosition(2000).then((coords) => {
-        fetch('/api/attendance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'STAFF_PUNCH',
-            type: 'out',
-            staffId: userLoggingOut.id,
-            userName: userLoggingOut.name,
-            userRole: userLoggingOut.role,
-            latitude: coords?.latitude,
-            longitude: coords?.longitude,
-          }),
-        })
-          .then((res) => res.json())
-          .then((json) => {
-            if (json.success && json.data) {
-              setDb(json.data);
-            }
-          })
-          .catch((err) => console.warn('Attendance logout check-out note:', err));
-      });
-    }
   };
 
   useEffect(() => {
@@ -320,8 +250,8 @@ export default function HMSApp() {
             const userAtt = json.data.attendance?.find(
               (a: any) => (a.staffId === activeUser.id || a.staffName?.toLowerCase() === activeUser.name?.toLowerCase()) && a.date === todayStr
             );
-            if (userAtt && userAtt.checkOutTime) {
-              handleLogout(true);
+            if (userAtt && userAtt.checkOutTime && userAtt.checkOutTime !== '--:--' && userAtt.checkOutTime.trim() !== '') {
+              handleLogout();
               return;
             }
           }
@@ -600,6 +530,9 @@ export default function HMSApp() {
     const json = await res.json();
     if (json.success && json.data) {
       setDb(json.data);
+      if (json.punchType === 'punch_out' && currentUser && currentUser.id === staffId) {
+        handleLogout();
+      }
     } else if (json.geofenceRestricted || !json.success) {
       alert(`📍 Attendance Blocked: ${json.message || 'Outside designated restaurant premises.'}`);
     }

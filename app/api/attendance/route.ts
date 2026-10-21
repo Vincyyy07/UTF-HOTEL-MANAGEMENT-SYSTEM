@@ -107,8 +107,8 @@ export async function POST(req: Request) {
       const currentTimeStr = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
 
       if (existingLog) {
-        // Case A: Staff already punched in, now punching OUT
-        if (!existingLog.checkOutTime) {
+        // Case A: Staff already punched in, now punching OUT (2nd scan automatically logs off)
+        if (!existingLog.checkOutTime || existingLog.checkOutTime === '--:--' || existingLog.checkOutTime.trim() === '') {
           const hours = calculateShiftHours(existingLog.checkInTime, currentTimeStr);
           const departure = calculateDeparture(currentTimeStr, assignedShift);
 
@@ -118,6 +118,12 @@ export async function POST(req: Request) {
           existingLog.leftEarlyMinutes = departure.leftEarlyMinutes;
           existingLog.isOvertime = departure.isOvertime;
           existingLog.overtimeMinutes = departure.overtimeMinutes;
+          if (latitude !== undefined && longitude !== undefined) {
+            existingLog.verifiedLatitude = Number(latitude);
+            existingLog.verifiedLongitude = Number(longitude);
+            existingLog.distanceMeters = verifiedDistance;
+            existingLog.isLocationVerified = true;
+          }
 
           const auditDesc = departure.leftEarly
             ? `Punched OUT at ${currentTimeStr} (${hours} hrs, left early by ${departure.leftEarlyMinutes}m, shift: ${assignedShift.name})`
@@ -182,6 +188,10 @@ export async function POST(req: Request) {
           isLate: punctuality.isLate,
           lateMinutes: punctuality.lateMinutes,
           demoFlag: false,
+          verifiedLatitude: latitude !== undefined ? Number(latitude) : undefined,
+          verifiedLongitude: longitude !== undefined ? Number(longitude) : undefined,
+          distanceMeters: verifiedDistance,
+          isLocationVerified: verifiedDistance !== undefined,
         };
         db.attendance.unshift(newLog);
 
